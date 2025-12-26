@@ -1,0 +1,56 @@
+# Geometric Benchmark Configuration
+# Customize task parameters here
+
+periodic_1d:
+  mod_add_p97:
+    task: mod_add
+    p: 97
+    epochs: 20000
+    model_size: tiny
+    pos_enc: sinusoidal
+    train_frac: 0.5
+    batch_size: 32
+    lr: 0.001
+    weight_decay: 0.0
+
+  mod_add_p43:
+    task: mod_add
+    p: 43
+    epochs: 15000
+    model_size: tiny
+    pos_enc: sinusoidal
+    train_frac: 0.5
+    batch_size: 32
+    lr: 0.001
+
+  digit_sum:
+    task: digit_sum
+    max_digits: 3
+    epochs: 10000
+    model_size: tiny
+    pos_enc: learned
+    batch_size: 64
+
+  parity:
+    task: parity
+    max_val: 1000
+    epochs: 10000
+    model_size: tiny
+    pos_enc: learned
+    batch_size: 64
+
+periodic_2d:
+  torus_distance:
+    script: tasks/periodic_2d/train_torus.py
+    grid_size: 16
+    epochs: 20000
+    model_size: tiny
+
+topological:
+  winding_number:
+    script: tasks/topological/train_winding.py
+    max_winding: 5
+    epochs: 20000
+    model_size: tiny
+
+# Additional task categories can be added here
