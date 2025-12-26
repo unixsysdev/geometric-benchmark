@@ -16,8 +16,8 @@ import json
 from pathlib import Path
 
 # Add library to path
-library_path = Path(__file__).parent.parent.parent / 'library'
-sys.path.insert(0, str(library_path))
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
 
 import torch
 import torch.nn as nn
@@ -40,6 +40,7 @@ from library.viz import (
     plot_training_curves,
 )
 import matplotlib.pyplot as plt
+import torch.nn.functional as F
 
 
 class WindingNumberDataset(Dataset):
@@ -110,39 +111,55 @@ class WindingNumberDataset(Dataset):
         """
         Generate a closed curve with specified winding number using epicycles.
 
+        The key insight: a curve that traverses theta from 0 to 2*pi*|w| winds |w| times.
+        Direction (sign of winding) is controlled by the direction of traversal.
+
         Args:
-            winding: Target winding number
+            winding: Target winding number (can be negative)
             rng: Random number generator
 
         Returns:
             Array of shape [n_points, 2] with (x, y) coordinates
         """
-        # Base radius
-        r0 = rng.uniform(0.5, 1.0)
+        # Base radius (distance from origin)
+        r0 = rng.uniform(1.0, 2.0)
 
         # Add epicycles to create variation while preserving winding number
         n_epicycles = rng.integers(1, 4)
-        phases = rng.uniform(0, 2 * np.pi, n_epicycles)
+        epicycle_freqs = rng.integers(2, 6, size=n_epicycles)
+        epicycle_phases = rng.uniform(0, 2 * np.pi, n_epicycles)
+        epicycle_amps = rng.uniform(0.1, 0.3, n_epicycles) * r0
 
-        # Generate points
-        thetas = np.linspace(0, 2 * np.pi, self.n_points, endpoint=False)
+        # Parameter t goes from 0 to 1
+        t_vals = np.linspace(0, 1, self.n_points, endpoint=False)
 
         curve = []
-        for theta in thetas:
-            # Base circle (contributes to winding number)
-            x = r0 * np.cos(theta) * (abs(winding) + 1)
-            y = r0 * np.sin(theta) * (abs(winding) + 1)
+        for t in t_vals:
+            if winding == 0:
+                # For winding=0: create a curve that doesn't wind around origin
+                # Use a figure-8 or similar shape that crosses itself
+                # Simple approach: ellipse offset from origin
+                offset = r0 * 1.5  # Offset so origin is outside the curve
+                x = r0 * 0.5 * np.cos(2 * np.pi * t) + offset
+                y = r0 * 0.5 * np.sin(2 * np.pi * t)
+            else:
+                # For non-zero winding: traverse |winding| times around origin
+                # The angle covered is 2*pi*|winding|
+                theta = 2 * np.pi * abs(winding) * t
 
-            # Add epicycles (don't change winding number if small enough)
-            for i, phase in enumerate(phases):
-                freq = i + 2
-                amp = r0 / (freq * freq)
-                x += amp * np.cos(freq * theta + phase)
-                y += amp * np.sin(freq * theta + phase)
+                # Direction: positive winding = counter-clockwise, negative = clockwise
+                if winding < 0:
+                    theta = -theta
 
-            # Reverse direction for negative winding
-            if winding < 0:
-                x, y = x, -y
+                # Base circle
+                x = r0 * np.cos(theta)
+                y = r0 * np.sin(theta)
+
+                # Add epicycles (higher frequency perturbations that don't change winding)
+                for freq, phase, amp in zip(epicycle_freqs, epicycle_phases, epicycle_amps):
+                    # Use higher frequencies so they average out
+                    x += amp * np.cos(freq * theta + phase)
+                    y += amp * np.sin(freq * theta + phase)
 
             curve.append([x, y])
 
@@ -180,7 +197,8 @@ class WindingNumberDataset(Dataset):
 
         # Quantize curve to grid
         # Normalize to [0, vocab_size-1]
-        coord_range = 3.0  # Approximate range of curves
+        # Compute the range from the actual data for robustness
+        coord_range = 5.0  # Generous range to cover all curves
         curve_norm = (curve + coord_range) / (2 * coord_range)
         curve_quantized = np.clip(
             (curve_norm * (self.vocab_size - 1)).astype(int),
@@ -412,18 +430,20 @@ def analyze_model(model, dataset, args, step, results_dir):
         )
         print("  ✓ Saved embeddings_pca.png")
 
-    # Save results
+    # Save results (convert numpy arrays to lists for JSON serialization)
+    results_json = {
+        'winding_correlation': results['winding_correlation'],
+        'pca_variance_explained': pca_result['metrics']['total_variance_explained'],
+    }
     results_file = results_dir / f'step_{step}' / 'analysis_results.json'
     with open(results_file, 'w') as f:
-        json.dump(results, f, indent=2)
+        json.dump(results_json, f, indent=2)
     print("  ✓ Saved analysis_results.json")
 
     return results
 
 
 def main():
-    import torch.nn.functional as F
-
     args = parse_args()
 
     # Set random seed

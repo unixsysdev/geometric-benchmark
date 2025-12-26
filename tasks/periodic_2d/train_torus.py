@@ -13,9 +13,9 @@ import sys
 import json
 from pathlib import Path
 
-# Add library to path
-library_path = Path(__file__).parent.parent.parent / 'library'
-sys.path.insert(0, str(library_path))
+# Add project root to path
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
 
 import torch
 import torch.nn as nn
@@ -36,6 +36,7 @@ from library.viz import (
     plot_embedding_geometry,
     plot_training_curves,
 )
+import matplotlib.pyplot as plt
 
 
 class TorusDistanceDataset(Dataset):
@@ -52,9 +53,10 @@ class TorusDistanceDataset(Dataset):
         seed: Random seed
     """
 
-    def __init__(self, grid_size: int = 16, max_samples: int = None,
+    def __init__(self, grid_size: int = 16, n_bins: int = None, max_samples: int = None,
                  split: str = 'train', seed: int = 42):
         self.grid_size = grid_size
+        self.n_bins = n_bins if n_bins is not None else grid_size
         self.split = split
         self.seed = seed
 
@@ -106,9 +108,8 @@ class TorusDistanceDataset(Dataset):
         # Output: Distance as regression target (for simplicity, discretize)
         # Discretize into bins
         max_dist = np.sqrt(2) * self.grid_size / 2
-        n_bins = self.grid_size  # Number of distance bins
-        bin_idx = int((distance / max_dist) * n_bins)
-        bin_idx = min(bin_idx, n_bins - 1)
+        bin_idx = int((distance / max_dist) * self.n_bins)
+        bin_idx = min(bin_idx, self.n_bins - 1)
 
         target_tokens = torch.tensor([bin_idx], dtype=torch.long)
 
@@ -116,6 +117,7 @@ class TorusDistanceDataset(Dataset):
             'task': 'torus_distance',
             'split': self.split,
             'grid_size': self.grid_size,
+            'n_bins': self.n_bins,
             'x1': x1, 'y1': y1, 'x2': x2, 'y2': y2,
             'distance': distance,
             'bin_idx': bin_idx,
@@ -127,7 +129,7 @@ class TorusDistanceDataset(Dataset):
         return self.grid_size
 
     def get_output_size(self):
-        return self.grid_size  # Number of distance bins
+        return self.n_bins  # Number of distance bins  # Number of distance bins
 
     def get_seq_len(self):
         return (4, 1)
@@ -149,6 +151,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Train torus distance task')
 
     parser.add_argument('--grid_size', type=int, default=16, help='Size of torus grid')
+    parser.add_argument('--n_bins', type=int, default=None, help='Number of distance bins (default: grid_size)')
     parser.add_argument('--max_samples', type=int, default=10000, help='Max samples per split')
     parser.add_argument('--epochs', type=int, default=10000, help='Training steps')
     parser.add_argument('--batch_size', type=int, default=32, help='Batch size')
@@ -171,11 +174,14 @@ def parse_args():
     return parser.parse_args()
 
 
-def create_model_from_args(args):
+def create_model_from_args(args, output_size=None):
     """Create model for torus task."""
+    if output_size is None:
+        output_size = args.n_bins if args.n_bins else args.grid_size
+    
     model_kwargs = {
         'vocab_size': args.grid_size,
-        'output_size': args.grid_size,
+        'output_size': output_size,
         'pos_enc_type': args.pos_enc,
         'pos_enc_max_val': args.grid_size,
     }
@@ -334,18 +340,27 @@ def analyze_model(model, dataset, args, step, results_dir):
         plt.close()
         print("  ✓ Saved embedding_grid.png")
 
-    # Save results
+    # Save results (convert to JSON-serializable format)
+    def make_serializable(obj):
+        if isinstance(obj, (np.floating, np.integer)):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, dict):
+            return {k: make_serializable(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [make_serializable(v) for v in obj]
+        return obj
+
     results_file = results_dir / f'step_{step}' / 'analysis_results.json'
     with open(results_file, 'w') as f:
-        json.dump(results, f, indent=2)
+        json.dump(make_serializable(results), f, indent=2)
     print("  ✓ Saved analysis_results.json")
 
     return results
 
 
 def main():
-    import matplotlib.pyplot as plt
-
     args = parse_args()
 
     # Set random seed
@@ -366,24 +381,28 @@ def main():
     print("Creating datasets...")
     train_dataset = TorusDistanceDataset(
         grid_size=args.grid_size,
+        n_bins=args.n_bins,
         max_samples=args.max_samples,
         split='train',
         seed=args.seed,
     )
     val_dataset = TorusDistanceDataset(
         grid_size=args.grid_size,
+        n_bins=args.n_bins,
         max_samples=args.max_samples // 5,
         split='val',
         seed=args.seed,
     )
 
+    n_bins_actual = train_dataset.n_bins
     print(f"  Train samples: {len(train_dataset)}")
     print(f"  Val samples: {len(val_dataset)}")
-    print(f"  Grid size: {args.grid_size}x{args.grid_size}\n")
+    print(f"  Grid size: {args.grid_size}x{args.grid_size}")
+    print(f"  Output bins: {n_bins_actual}\n")
 
     # Create model
     print("Creating model...")
-    model = create_model_from_args(args)
+    model = create_model_from_args(args, output_size=train_dataset.get_output_size())
     print(f"  Model: {args.model_size}")
     print(f"  Parameters: {sum(p.numel() for p in model.parameters()):,}\n")
 

@@ -14,11 +14,8 @@ import json
 import time
 from tqdm import tqdm
 
-import sys
-sys.path.append(str(Path(__file__).parent))
-
-from models import UnifiedTransformer
-from datasets import BaseDataset
+from .models import UnifiedTransformer
+from .datasets import BaseDataset
 
 
 class Trainer:
@@ -114,12 +111,20 @@ class Trainer:
                 # Forward pass
                 logits = self.model(inputs, return_cache=True)
 
-                # Reshape for loss: [batch, seq_len, vocab] -> [batch*seq_len, vocab]
+                # Handle different task types based on target shape
                 batch_size, seq_len, vocab_size = logits.shape
-                logits_flat = logits.view(-1, vocab_size)
-                targets_flat = targets.view(-1)
+                target_seq_len = targets.shape[1] if targets.dim() > 1 else 1
 
-                loss = self.loss_fn(logits_flat, targets_flat)
+                if target_seq_len == 1:
+                    # Classification task: use last position only
+                    logits_for_loss = logits[:, -1, :]  # [batch, vocab_size]
+                    targets_flat = targets.view(-1)  # [batch]
+                else:
+                    # Sequence-to-sequence task: flatten all positions
+                    logits_for_loss = logits.view(-1, vocab_size)
+                    targets_flat = targets.view(-1)
+
+                loss = self.loss_fn(logits_for_loss, targets_flat)
 
                 # Backward pass
                 self.optimizer.zero_grad()
@@ -135,7 +140,7 @@ class Trainer:
 
                 # Compute accuracy
                 with torch.no_grad():
-                    preds = logits_flat.argmax(dim=-1)
+                    preds = logits_for_loss.argmax(dim=-1)
                     acc = (preds == targets_flat).float().mean()
 
                 # Log metrics
@@ -207,12 +212,21 @@ class Trainer:
 
                 logits = self.model(inputs)
 
+                # Handle different task types based on target shape
                 batch_size, seq_len, vocab_size = logits.shape
-                logits_flat = logits.view(-1, vocab_size)
-                targets_flat = targets.view(-1)
+                target_seq_len = targets.shape[1] if targets.dim() > 1 else 1
 
-                loss = self.loss_fn(logits_flat, targets_flat)
-                preds = logits_flat.argmax(dim=-1)
+                if target_seq_len == 1:
+                    # Classification task: use last position only
+                    logits_for_loss = logits[:, -1, :]  # [batch, vocab_size]
+                    targets_flat = targets.view(-1)  # [batch]
+                else:
+                    # Sequence-to-sequence task: flatten all positions
+                    logits_for_loss = logits.view(-1, vocab_size)
+                    targets_flat = targets.view(-1)
+
+                loss = self.loss_fn(logits_for_loss, targets_flat)
+                preds = logits_for_loss.argmax(dim=-1)
                 acc = (preds == targets_flat).float().mean()
 
                 total_loss += loss.item()

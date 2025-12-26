@@ -73,6 +73,7 @@ class LearnedPositionalEncoding(nn.Module):
 
     def __init__(self, max_val: int, d_model: int):
         super().__init__()
+        self.max_val = max_val
         self.embedding = nn.Embedding(max_val + 1, d_model)  # +1 for padding
         self.d_model = d_model
 

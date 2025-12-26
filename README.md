@@ -295,6 +295,83 @@ MIT License — See LICENSE file for details
 
 ---
 
+## Experimental Results (December 2025)
+
+### Experiments Attempted
+
+#### 1. Winding Number Classification (Topological) ❌
+
+**Task:** Given a closed curve (sequence of points), predict how many times it wraps around the origin (-3 to +3).
+
+**Setup:**
+- Model: Tiny transformer (400K params) and with weight decay 0.1
+- Training: 20,000 steps
+- Data: 500 curves per winding class, 32 points per curve
+
+**Results:**
+- Train accuracy: ~100% (memorized)
+- Val accuracy: ~68-79% (stuck, no grokking)
+- PC1 correlation with winding number: ~0.05 (essentially zero)
+- No clean topological structure emerged in embeddings
+
+**Why it failed:** Winding number requires **sequential accumulation** — you must trace the curve and sum angle changes. Transformers do parallel attention, not sequential counting. This appears to be an architectural mismatch.
+
+---
+
+#### 2. Torus Distance Prediction (2D Periodic) ❌
+
+**Task:** Given two points on a 13×13 wrap-around grid, predict their distance (5 bins).
+
+**Setup:**
+- Models: Tiny (400K params) and Small (3.1M params)
+- Training: 50,000 steps with weight decay 1.0
+- Batch size: 512-2048
+
+**Results:**
+- Tiny model: Train ~58%, Val ~58% (no gap, but low accuracy)
+- Small model: Train ~76%, Val ~46% (large gap = memorization)
+- No grokking observed
+- Embedding grids showed some stripe patterns but no clean 2D Fourier modes
+- Analysis code reported mode=(0,0) throughout (DC component only)
+
+**Why it failed:** Torus distance is NOT a group operation. The formula `sqrt(dx² + dy²)` has no clean Fourier decomposition:
+- Subtraction: has trig identity ✓
+- Squaring: breaks Fourier structure ✗
+- Square root: no trig identity ✗
+
+Unlike mod-p addition (abelian group → guaranteed Fourier solution), distance is a **metric**, not an **algebraic operation**. No representation theory guarantees apply.
+
+---
+
+### Key Insights
+
+1. **Abelian group operations → Fourier works** (proven by Nanda et al.)
+   - Commutativity allows 1D representations
+   - Cyclic structure → exponentials → sin/cos
+
+2. **Non-group operations → No guarantee**
+   - Distance, winding number lack algebraic structure
+   - Gradient descent may not find clean solutions even if they exist
+
+3. **Architecture matters**
+   - Winding number needs sequential processing (RNN-like)
+   - Transformers excel at parallel comparison, not accumulation
+
+4. **Analysis code limitations**
+   - 2D Fourier analysis always reported mode (0,0) due to DC dominance
+   - Visual inspection of embedding grids more informative than automated metrics
+   - Periodicity detection used 1D analysis on 2D data (bug)
+
+---
+
+### Recommended Next Steps
+
+1. **Torus Addition** — `(x1+x2 mod p, y1+y2 mod p)` — guaranteed to show 2D Fourier structure
+2. **Permutation Groups** — Non-abelian but still groups, unknown what representations emerge  
+3. **Fix analysis code** — Exclude DC component, proper 2D periodicity detection
+
+---
+
 ## Acknowledgments
 
 Built on top of the `grokking-fourier` project. Inspired by:

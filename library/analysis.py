@@ -15,7 +15,11 @@ from scipy import signal, stats
 from scipy.fft import fft, fft2, fftfreq
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
-import umap
+try:
+    import umap
+    UMAP_AVAILABLE = True
+except ImportError:
+    UMAP_AVAILABLE = False
 
 
 def compute_fourier_1d(
@@ -338,6 +342,8 @@ def analyze_embedding_geometry(
         metrics = {'perplexity': reducer.perplexity if hasattr(reducer, 'perplexity') else 30}
 
     elif method == 'umap':
+        if not UMAP_AVAILABLE:
+            raise ImportError("umap-learn is not installed. Install with: pip install umap-learn")
         reducer = umap.UMAP(n_components=n_components, random_state=42)
         reduced = reducer.fit_transform(embeddings_np)
         metrics = {}
